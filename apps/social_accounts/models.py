@@ -31,7 +31,7 @@ class SocialAccount(models.Model):
     )
     account_name = models.CharField(max_length=255)
     account_handle = models.CharField(max_length=255, blank=True, default="")
-    avatar_url = models.URLField(max_length=500, blank=True, default="")
+    avatar_url = models.URLField(max_length=2000, blank=True, default="")
     follower_count = models.IntegerField(default=0)
 
     # Encrypted OAuth tokens
@@ -40,7 +40,7 @@ class SocialAccount(models.Model):
     token_expires_at = models.DateTimeField(blank=True, null=True)
 
     # Instance URL for Mastodon and Bluesky PDS
-    instance_url = models.URLField(max_length=500, blank=True, default="")
+    instance_url = models.URLField(max_length=2000, blank=True, default="")
 
     # Connection health
     connection_status = models.CharField(
@@ -165,7 +165,7 @@ class MastodonAppRegistration(models.Model):
     """Stores per-instance OAuth app registrations for Mastodon federation."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    instance_url = models.URLField(max_length=500, unique=True)
+    instance_url = models.URLField(max_length=2000, unique=True)
     client_id = EncryptedTextField()
     client_secret = EncryptedTextField()
     created_at = models.DateTimeField(auto_now_add=True)

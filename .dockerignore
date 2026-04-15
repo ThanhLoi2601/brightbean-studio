@@ -1,0 +1,24 @@
+# Node
+node_modules
+**/node_modules
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Env
+.env
+
+# Build
+dist/
+build/
+
+# IDE
+.vscode
+.idea
