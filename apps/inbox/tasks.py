@@ -2,6 +2,7 @@
 
 import logging
 
+from background_task import background
 from django.utils import timezone
 
 from apps.members.models import WorkspaceMembership
@@ -149,3 +150,16 @@ class InboxSyncEngine:
                     "workspace_id": str(message.workspace_id),
                 },
             )
+
+
+@background()
+def sync_inbox_messages():
+    """Background task to sync inbox messages from all connected accounts.
+    
+    Runs on a schedule (configurable via AppConfig registration).
+    Polls each connected social account for new comments, mentions, and DMs.
+    """
+    engine = InboxSyncEngine()
+    engine.sync_all()
+    engine.check_sla()
+    logger.info("Inbox sync cycle completed")
