@@ -549,28 +549,57 @@ class LinkedInProvider(SocialProvider):
 
         post_id should be the post URN.
         """
-        resp = self._request(
-            "GET",
-            f"{API_BASE}/rest/organizationalEntityShareStatistics",
-            access_token=access_token,
-            headers=LINKEDIN_HEADERS,
-            params={"q": "organizationalEntity", "shares[0]": post_id},
-        )
-        data = resp.json()
-        elements = data.get("elements", [])
-        if not elements:
-            return PostMetrics(extra={"raw": data})
+        # Try organizational entity statistics first (for company pages)
+        try:
+            resp = self._request(
+                "GET",
+                f"{API_BASE}/rest/organizationalEntityShareStatistics",
+                access_token=access_token,
+                headers=LINKEDIN_HEADERS,
+                params={"q": "organizationalEntity", "organizationalEntity": f"urn:li:organization:{self.credentials.get('organization_id', '')}"},
+            )
+            data = resp.json()
+            elements = data.get("elements", [])
 
-        stats = elements[0].get("totalShareStatistics", {})
-        return PostMetrics(
-            impressions=stats.get("impressionCount", 0),
-            engagements=stats.get("engagementCount", 0),
-            likes=stats.get("likeCount", 0),
-            comments=stats.get("commentCount", 0),
-            shares=stats.get("shareCount", 0),
-            clicks=stats.get("clickCount", 0),
-            extra={"raw_statistics": stats},
-        )
+            # Find stats for this specific post
+            for element in elements:
+                if element.get("share") == post_id:
+                    stats = element.get("totalShareStatistics", {})
+                    return PostMetrics(
+                        impressions=stats.get("impressionCount", 0),
+                        engagements=stats.get("engagementCount", 0),
+                        likes=stats.get("likeCount", 0),
+                        comments=stats.get("commentCount", 0),
+                        shares=stats.get("shareCount", 0),
+                        clicks=stats.get("clickCount", 0),
+                        extra={"raw_statistics": stats},
+                    )
+
+        except APIError:
+            # Fall back to basic post info if organizational stats fail
+            pass
+
+        # Fallback: Get basic post info and return minimal metrics
+        try:
+            resp = self._request(
+                "GET",
+                f"{API_BASE}/rest/posts/{post_id}",
+                access_token=access_token,
+                headers=LINKEDIN_HEADERS,
+            )
+            data = resp.json()
+            # LinkedIn doesn't provide detailed metrics in basic post response
+            return PostMetrics(
+                impressions=0,
+                engagements=0,
+                likes=0,
+                comments=0,
+                shares=0,
+                clicks=0,
+                extra={"raw_post": data, "note": "Detailed metrics not available"},
+            )
+        except APIError:
+            return PostMetrics(extra={"error": "Unable to fetch post metrics"})
 
     # ------------------------------------------------------------------
     # Token management

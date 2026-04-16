@@ -334,56 +334,116 @@ class InstagramProvider(SocialProvider):
     # ------------------------------------------------------------------
 
     def get_post_metrics(self, access_token: str, post_id: str) -> PostMetrics:
-        metrics = ["impressions", "reach", "engagement", "saved"]
-        resp = self._request(
-            "GET",
-            f"{BASE_URL}/{post_id}/insights",
-            access_token=access_token,
-            params={"metric": ",".join(metrics)},
-        )
-        data = resp.json()
-        values: dict = {}
-        for entry in data.get("data", []):
-            name = entry.get("name", "")
-            val = entry.get("values", [{}])[0].get("value", 0)
-            values[name] = val
+        """Fetch metrics for a specific Instagram post."""
+        # Try insights API first
+        try:
+            metrics = ["impressions", "reach", "engagement", "saved"]
+            resp = self._request(
+                "GET",
+                f"{BASE_URL}/{post_id}/insights",
+                access_token=access_token,
+                params={"metric": ",".join(metrics)},
+            )
+            data = resp.json()
+            values: dict = {}
+            for entry in data.get("data", []):
+                name = entry.get("name", "")
+                val = entry.get("values", [{}])[0].get("value", 0)
+                values[name] = val
 
-        return PostMetrics(
-            impressions=values.get("impressions", 0),
-            reach=values.get("reach", 0),
-            engagements=values.get("engagement", 0),
-            saves=values.get("saved", 0),
-            extra={"raw_insights": values},
-        )
+            return PostMetrics(
+                impressions=values.get("impressions", 0),
+                reach=values.get("reach", 0),
+                engagements=values.get("engagement", 0),
+                saves=values.get("saved", 0),
+                extra={"raw_insights": values},
+            )
+        except APIError as e:
+            if "insights" in str(e).lower() or "nonexisting field" in str(e).lower():
+                # Fall back to basic post data
+                pass
+            else:
+                raise
+
+        # Fallback: Get basic post data
+        try:
+            resp = self._request(
+                "GET",
+                f"{BASE_URL}/{post_id}",
+                access_token=access_token,
+                params={"fields": "like_count,comments_count,view_count"},
+            )
+            data = resp.json()
+
+            return PostMetrics(
+                impressions=0,  # Not available in basic API
+                reach=0,
+                engagements=data.get("like_count", 0) + data.get("comments_count", 0),
+                likes=data.get("like_count", 0),
+                comments=data.get("comments_count", 0),
+                video_views=data.get("view_count"),
+                extra={"raw_post": data, "note": "Limited metrics from basic API"},
+            )
+        except APIError:
+            return PostMetrics(extra={"error": "Unable to fetch post metrics"})
 
     def get_account_metrics(self, access_token: str, date_range: tuple[datetime, datetime]) -> AccountMetrics:
+        """Fetch account-level metrics for Instagram."""
         ig_user_id = self.credentials.get("ig_user_id", "me")
-        metrics = ["impressions", "reach", "follower_count", "profile_views"]
-        resp = self._request(
-            "GET",
-            f"{BASE_URL}/{ig_user_id}/insights",
-            access_token=access_token,
-            params={
-                "metric": ",".join(metrics),
-                "period": "day",
-                "since": int(date_range[0].timestamp()),
-                "until": int(date_range[1].timestamp()),
-            },
-        )
-        data = resp.json()
-        values: dict = {}
-        for entry in data.get("data", []):
-            name = entry.get("name", "")
-            val = entry.get("values", [{}])[0].get("value", 0)
-            values[name] = val
 
-        return AccountMetrics(
-            impressions=values.get("impressions", 0),
-            reach=values.get("reach", 0),
-            followers=values.get("follower_count", 0),
-            profile_views=values.get("profile_views", 0),
-            extra={"raw_insights": values},
-        )
+        # Try insights API first
+        try:
+            metrics = ["impressions", "reach", "follower_count", "profile_views"]
+            resp = self._request(
+                "GET",
+                f"{BASE_URL}/{ig_user_id}/insights",
+                access_token=access_token,
+                params={
+                    "metric": ",".join(metrics),
+                    "period": "day",
+                    "since": int(date_range[0].timestamp()),
+                    "until": int(date_range[1].timestamp()),
+                },
+            )
+            data = resp.json()
+            values: dict = {}
+            for entry in data.get("data", []):
+                name = entry.get("name", "")
+                val = entry.get("values", [{}])[0].get("value", 0)
+                values[name] = val
+
+            return AccountMetrics(
+                impressions=values.get("impressions", 0),
+                reach=values.get("reach", 0),
+                followers=values.get("follower_count", 0),
+                profile_views=values.get("profile_views", 0),
+                extra={"raw_insights": values},
+            )
+        except APIError as e:
+            if "insights" in str(e).lower() or "nonexisting field" in str(e).lower():
+                # Fall back to basic account data
+                pass
+            else:
+                raise
+
+        # Fallback: Get basic account data
+        try:
+            resp = self._request(
+                "GET",
+                f"{BASE_URL}/{ig_user_id}",
+                access_token=access_token,
+                params={"fields": "follower_count,follows_count,media_count"},
+            )
+            data = resp.json()
+
+            return AccountMetrics(
+                followers=data.get("follower_count", 0),
+                following=data.get("follows_count", 0),
+                post_count=data.get("media_count", 0),
+                extra={"raw_account": data, "note": "Limited metrics from basic API"},
+            )
+        except APIError:
+            return AccountMetrics(extra={"error": "Unable to fetch account metrics"})
 
     # ------------------------------------------------------------------
     # Inbox

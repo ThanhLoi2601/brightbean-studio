@@ -308,62 +308,134 @@ class FacebookProvider(SocialProvider):
     # ------------------------------------------------------------------
 
     def get_post_metrics(self, access_token: str, post_id: str) -> PostMetrics:
-        metrics = [
-            "post_impressions",
-            "post_engaged_users",
-            "post_clicks",
-            "post_reactions_by_type_total",
+        """Fetch metrics for a specific Facebook post."""
+        # Try different sets of metrics as some may not be available
+        metric_sets = [
+            ["post_impressions", "post_engaged_users", "post_clicks", "post_reactions_by_type_total"],
+            ["post_impressions", "post_engaged_users", "post_clicks"],
+            ["post_impressions_unique", "post_engaged_users", "post_consumptions_by_type"],
         ]
-        resp = self._request(
-            "GET",
-            f"{BASE_URL}/{post_id}/insights",
-            access_token=access_token,
-            params={"metric": ",".join(metrics)},
-        )
-        data = resp.json()
-        values: dict = {}
-        for entry in data.get("data", []):
-            name = entry.get("name", "")
-            val = entry.get("values", [{}])[0].get("value", 0)
-            values[name] = val
 
-        reactions = values.get("post_reactions_by_type_total", {})
-        total_likes = reactions.get("like", 0) + reactions.get("love", 0) if isinstance(reactions, dict) else 0
+        for metrics in metric_sets:
+            try:
+                resp = self._request(
+                    "GET",
+                    f"{BASE_URL}/{post_id}/insights",
+                    access_token=access_token,
+                    params={"metric": ",".join(metrics)},
+                )
+                data = resp.json()
+                values: dict = {}
+                for entry in data.get("data", []):
+                    name = entry.get("name", "")
+                    val = entry.get("values", [{}])[0].get("value", 0)
+                    values[name] = val
 
-        return PostMetrics(
-            impressions=values.get("post_impressions", 0),
-            engagements=values.get("post_engaged_users", 0),
-            clicks=values.get("post_clicks", 0),
-            likes=total_likes,
-            extra={"raw_insights": values},
-        )
+                reactions = values.get("post_reactions_by_type_total", {})
+                total_likes = 0
+                if isinstance(reactions, dict):
+                    total_likes = sum(reactions.values())
+                elif isinstance(reactions, (int, str)):
+                    total_likes = int(reactions)
+
+                consumptions = values.get("post_consumptions_by_type", {})
+                total_clicks = 0
+                if isinstance(consumptions, dict):
+                    total_clicks = sum(consumptions.values())
+                elif isinstance(consumptions, (int, str)):
+                    total_clicks = int(consumptions)
+
+                return PostMetrics(
+                    impressions=values.get("post_impressions", values.get("post_impressions_unique", 0)),
+                    engagements=values.get("post_engaged_users", 0),
+                    clicks=values.get("post_clicks", total_clicks),
+                    likes=total_likes,
+                    extra={"raw_insights": values},
+                )
+            except APIError as e:
+                if "insights metric" in str(e).lower():
+                    continue  # Try next metric set
+                raise  # Re-raise other errors
+
+        # If all metric sets fail, try to get basic post data
+        try:
+            resp = self._request(
+                "GET",
+                f"{BASE_URL}/{post_id}",
+                access_token=access_token,
+                params={"fields": "likes.summary(true),comments.summary(true),shares"},
+            )
+            data = resp.json()
+
+            likes_count = data.get("likes", {}).get("summary", {}).get("total_count", 0)
+            comments_count = data.get("comments", {}).get("summary", {}).get("total_count", 0)
+            shares_count = data.get("shares", {}).get("count", 0) if data.get("shares") else 0
+
+            return PostMetrics(
+                impressions=0,  # Not available in basic API
+                engagements=likes_count + comments_count + shares_count,
+                likes=likes_count,
+                comments=comments_count,
+                shares=shares_count,
+                clicks=0,
+                extra={"raw_post": data, "note": "Limited metrics from basic API"},
+            )
+        except APIError:
+            return PostMetrics(extra={"error": "Unable to fetch post metrics"})
 
     def get_account_metrics(self, access_token: str, date_range: tuple[datetime, datetime]) -> AccountMetrics:
+        """Fetch account-level metrics for Facebook page."""
         page_id = self.credentials.get("page_id", "me")
-        metrics = ["page_impressions", "page_engaged_users", "page_fans"]
-        resp = self._request(
-            "GET",
-            f"{BASE_URL}/{page_id}/insights",
-            access_token=access_token,
-            params={
-                "metric": ",".join(metrics),
-                "since": int(date_range[0].timestamp()),
-                "until": int(date_range[1].timestamp()),
-            },
-        )
-        data = resp.json()
-        values: dict = {}
-        for entry in data.get("data", []):
-            name = entry.get("name", "")
-            val = entry.get("values", [{}])[0].get("value", 0)
-            values[name] = val
 
-        return AccountMetrics(
-            impressions=values.get("page_impressions", 0),
-            reach=values.get("page_engaged_users", 0),
-            followers=values.get("page_fans", 0),
-            extra={"raw_insights": values},
-        )
+        # Try insights API first
+        try:
+            metrics = ["page_impressions", "page_engaged_users", "page_fans"]
+            resp = self._request(
+                "GET",
+                f"{BASE_URL}/{page_id}/insights",
+                access_token=access_token,
+                params={
+                    "metric": ",".join(metrics),
+                    "since": int(date_range[0].timestamp()),
+                    "until": int(date_range[1].timestamp()),
+                },
+            )
+            data = resp.json()
+            values: dict = {}
+            for entry in data.get("data", []):
+                name = entry.get("name", "")
+                val = entry.get("values", [{}])[0].get("value", 0)
+                values[name] = val
+
+            return AccountMetrics(
+                impressions=values.get("page_impressions", 0),
+                reach=values.get("page_engaged_users", 0),
+                followers=values.get("page_fans", 0),
+                extra={"raw_insights": values},
+            )
+        except APIError as e:
+            if "insights metric" in str(e).lower():
+                # Fall back to basic page data
+                pass
+            else:
+                raise
+
+        # Fallback: Get basic page data
+        try:
+            resp = self._request(
+                "GET",
+                f"{BASE_URL}/{page_id}",
+                access_token=access_token,
+                params={"fields": "fan_count,about,category"},
+            )
+            data = resp.json()
+
+            return AccountMetrics(
+                followers=data.get("fan_count", 0),
+                extra={"raw_page": data, "note": "Limited metrics from basic API"},
+            )
+        except APIError:
+            return AccountMetrics(extra={"error": "Unable to fetch account metrics"})
 
     # ------------------------------------------------------------------
     # Inbox

@@ -57,6 +57,7 @@ LOCAL_APPS = [
     "apps.composer",
     "apps.calendar",
     "apps.publisher",
+    "apps.analytics",
     "apps.notifications",
     "apps.inbox",
     "apps.approvals",
@@ -155,6 +156,9 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
 }
 
