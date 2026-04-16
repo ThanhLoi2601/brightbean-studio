@@ -20,21 +20,25 @@ DAILY_CUTOFF_DAYS = 30  # Collect daily for posts up to 30 days old
 
 
 @background()
-def collect_all_analytics(collection_type: str = "hourly"):
+def collect_all_analytics_daily():
     """Collect metrics for posts and accounts.
-
-    Args:
-        collection_type: Either 'hourly' or 'daily'.
-                         Hourly: collects for recently published posts (<48h).
-                         Daily: collects for older posts and account-level metrics.
+    Daily: collects for older posts and account-level metrics.
     """
-    logger.info(f"Starting {collection_type} analytics collection")
+    logger.info("Starting Daily analytics collection")
 
-    if collection_type == "hourly":
-        _collect_recent_post_analytics()
-    elif collection_type == "daily":
-        _collect_all_post_analytics()
-        _collect_account_analytics()
+    _collect_all_post_analytics()
+    _collect_account_analytics()
+
+@background()
+def collect_all_analytics_hourly():
+    """Collect metrics for posts and accounts.
+    Hourly: collects for recently published posts (<48h).
+    """
+    logger.info("Starting hourly analytics collection")
+
+    _collect_recent_post_analytics()
+
+
 
 
 def _collect_recent_post_analytics():
@@ -56,9 +60,7 @@ def _collect_recent_post_analytics():
             _fetch_and_store_post_metrics(platform_post)
             count += 1
         except Exception as e:
-            logger.exception(
-                f"Failed to collect metrics for PlatformPost {platform_post.id}: {e}"
-            )
+            logger.exception(f"Failed to collect metrics for PlatformPost {platform_post.id}: {e}")
 
     logger.info(f"Collected metrics for {count} recent posts")
 
@@ -82,9 +84,7 @@ def _collect_all_post_analytics():
             _fetch_and_store_post_metrics(platform_post)
             count += 1
         except Exception as e:
-            logger.exception(
-                f"Failed to collect metrics for PlatformPost {platform_post.id}: {e}"
-            )
+            logger.exception(f"Failed to collect metrics for PlatformPost {platform_post.id}: {e}")
 
     logger.info(f"Collected metrics for {count} posts (up to {DAILY_CUTOFF_DAYS} days old)")
 
@@ -120,11 +120,7 @@ def _fetch_and_store_post_metrics(platform_post: PlatformPost) -> bool:
 
     # Calculate engagement rate
     total_engagement = metrics.likes + metrics.engagements + (metrics.extra.get("shares", 0))
-    engagement_rate = (
-        (total_engagement / metrics.impressions * 100)
-        if metrics.impressions > 0
-        else 0
-    )
+    engagement_rate = (total_engagement / metrics.impressions * 100) if metrics.impressions > 0 else 0
 
     # Store snapshot
     snapshot = AnalyticsSnapshot.objects.create(
@@ -200,5 +196,5 @@ def _fetch_and_store_account_metrics(account: SocialAccount) -> bool:
         extra=metrics.extra,
     )
 
-    logger.debug(f"Stored account metrics snapshot {snapshot.id} for {account.display_name}")
+    logger.debug(f"Stored account metrics snapshot {snapshot.id} for {account.account_name}")
     return True

@@ -22,23 +22,21 @@ class AnalyticsConfig(AppConfig):
         try:
             from background_task.models import Task
 
-            from apps.analytics.tasks import collect_all_analytics
+            from apps.analytics.tasks import collect_all_analytics_daily,collect_all_analytics_hourly
 
             # Hourly collection task
             if not Task.objects.filter(verbose_name="collect_all_analytics_hourly").exists():
-                collect_all_analytics(
-                    repeat=3600,  # Every hour
+                collect_all_analytics_hourly(
+                    repeat=60 * 3,  # Every hour
                     verbose_name="collect_all_analytics_hourly",
-                    kwargs={"collection_type": "hourly"},
                 )
                 logger.info("Registered hourly analytics collection task")
 
             # Daily collection task (for older posts and account metrics)
             if not Task.objects.filter(verbose_name="collect_all_analytics_daily").exists():
-                collect_all_analytics(
+                collect_all_analytics_daily(
                     repeat=86400,  # Every 24 hours
                     verbose_name="collect_all_analytics_daily",
-                    kwargs={"collection_type": "daily"},
                 )
                 logger.info("Registered daily analytics collection task")
         except Exception:

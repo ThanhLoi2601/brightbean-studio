@@ -51,21 +51,31 @@ def _analytics_dashboard_json(request, workspace):
     days = int(request.GET.get("days", 30))
     start_date = timezone.now() - timedelta(days=days)
 
-    # Get all snapshots for this workspace
-    snapshots = AnalyticsSnapshot.objects.filter(
-        workspace=workspace,
-        snapshot_at__gte=start_date,
-    ).select_related("platform_post__social_account", "platform_post__post")
+    # Get all snapshots in date range
+    all_snapshots = list(
+        AnalyticsSnapshot.objects.filter(
+            workspace=workspace,
+            snapshot_at__gte=start_date,
+        ).select_related("platform_post__social_account", "platform_post__post")
+    )
+
+    # Keep only latest snapshot per post
+    latest_by_post = {}
+    for s in all_snapshots:
+        post_id = s.platform_post_id
+        if post_id not in latest_by_post or s.snapshot_at > latest_by_post[post_id].snapshot_at:
+            latest_by_post[post_id] = s
+    snapshots = list(latest_by_post.values())
 
     # Aggregate metrics
-    total_metrics = snapshots.aggregate(
-        total_impressions=Sum("impressions"),
-        total_reach=Sum("reach"),
-        total_likes=Sum("likes"),
-        total_comments=Sum("comments"),
-        total_engagement=Sum("likes") + Sum("comments") + Sum("shares"),
-        avg_engagement_rate=Avg("engagement_rate"),
-    )
+    total_metrics = {
+        "total_impressions": sum(s.impressions for s in snapshots),
+        "total_reach": sum(s.reach for s in snapshots),
+        "total_likes": sum(s.likes for s in snapshots),
+        "total_comments": sum(s.comments for s in snapshots),
+        "total_engagement": sum(s.likes + s.comments + s.shares for s in snapshots),
+        "avg_engagement_rate": sum(s.engagement_rate for s in snapshots) / len(snapshots) if snapshots else 0,
+    }
 
     # Per-platform breakdown with detailed metrics
     platform_metrics = {}
@@ -93,6 +103,7 @@ def _analytics_dashboard_json(request, workspace):
         platform_metrics[platform]["comments"] += snapshot.comments
         platform_metrics[platform]["shares"] += snapshot.shares
         platform_metrics[platform]["total_engagement"] += snapshot.likes + snapshot.comments + snapshot.shares
+        platform_metrics[platform]["post_count"] += 1
 
         # Individual posts for this platform
         if platform not in platform_posts:
@@ -140,30 +151,21 @@ def _analytics_dashboard_json(request, workspace):
     top_posts.sort(key=lambda x: x["total_engagement"], reverse=True)
     top_posts = top_posts[:10]  # Top 10 posts
 
-    # Time series data for trends (daily aggregates)
-    from django.db.models.functions import TruncDate
-    from django.db.models import F
+    # Time series data for trends (daily aggregates) - rebuild from latest snapshots
+    ts_data = {}
+    for s in snapshots:
+        date_key = s.snapshot_at.date().isoformat()
+        if date_key not in ts_data:
+            ts_data[date_key] = {"date": date_key, "impressions": 0, "likes": 0, "comments": 0, "shares": 0}
+        ts_data[date_key]["impressions"] += s.impressions
+        ts_data[date_key]["likes"] += s.likes
+        ts_data[date_key]["comments"] += s.comments
+        ts_data[date_key]["shares"] += s.shares
 
-    time_series = (
-        snapshots.annotate(date=TruncDate("snapshot_at"))
-        .values("date")
-        .annotate(
-            impressions=Sum("impressions"),
-            likes=Sum("likes"),
-            comments=Sum("comments"),
-            shares=Sum("shares"),
-        )
-        .order_by("date")
-    )
-
-    # Calculate engagement in Python to avoid F expression serialization issues
     time_series_list = []
-    for item in time_series:
-        item_dict = dict(item)
-        item_dict["engagement"] = (
-            (item_dict.get("likes", 0) or 0) + (item_dict.get("comments", 0) or 0) + (item_dict.get("shares", 0) or 0)
-        )
-        time_series_list.append(item_dict)
+    for date_key, data in sorted(ts_data.items()):
+        data["engagement"] = data["likes"] + data["comments"] + data["shares"]
+        time_series_list.append(data)
 
     # Convert Decimal objects and dates to JSON serializable types
     def serialize_for_json(obj):

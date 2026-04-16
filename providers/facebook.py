@@ -308,80 +308,68 @@ class FacebookProvider(SocialProvider):
     # ------------------------------------------------------------------
 
     def get_post_metrics(self, access_token: str, post_id: str) -> PostMetrics:
-        """Fetch metrics for a specific Facebook post."""
-        # Try different sets of metrics as some may not be available
-        metric_sets = [
+        values: dict = {}
+        insights_failed = False
+
+        # Try insights API
+        for metric_set in [
             ["post_impressions", "post_engaged_users", "post_clicks", "post_reactions_by_type_total"],
             ["post_impressions", "post_engaged_users", "post_clicks"],
             ["post_impressions_unique", "post_engaged_users", "post_consumptions_by_type"],
-        ]
-
-        for metrics in metric_sets:
+        ]:
             try:
                 resp = self._request(
                     "GET",
                     f"{BASE_URL}/{post_id}/insights",
                     access_token=access_token,
-                    params={"metric": ",".join(metrics)},
+                    params={"metric": ",".join(metric_set)},
                 )
-                data = resp.json()
-                values: dict = {}
-                for entry in data.get("data", []):
+                for entry in resp.json().get("data", []):
                     name = entry.get("name", "")
                     val = entry.get("values", [{}])[0].get("value", 0)
                     values[name] = val
-
-                reactions = values.get("post_reactions_by_type_total", {})
-                total_likes = 0
-                if isinstance(reactions, dict):
-                    total_likes = sum(reactions.values())
-                elif isinstance(reactions, (int, str)):
-                    total_likes = int(reactions)
-
-                consumptions = values.get("post_consumptions_by_type", {})
-                total_clicks = 0
-                if isinstance(consumptions, dict):
-                    total_clicks = sum(consumptions.values())
-                elif isinstance(consumptions, (int, str)):
-                    total_clicks = int(consumptions)
-
-                return PostMetrics(
-                    impressions=values.get("post_impressions", values.get("post_impressions_unique", 0)),
-                    engagements=values.get("post_engaged_users", 0),
-                    clicks=values.get("post_clicks", total_clicks),
-                    likes=total_likes,
-                    extra={"raw_insights": values},
-                )
+                break  # Success
             except APIError as e:
                 if "insights metric" in str(e).lower():
-                    continue  # Try next metric set
-                raise  # Re-raise other errors
+                    insights_failed = True
+                    continue
+                raise
 
-        # If all metric sets fail, try to get basic post data
+        # Always get basic post data (likes, comments, shares) from post object
         try:
-            resp = self._request(
+            post_resp = self._request(
                 "GET",
                 f"{BASE_URL}/{post_id}",
                 access_token=access_token,
                 params={"fields": "likes.summary(true),comments.summary(true),shares"},
             )
-            data = resp.json()
+            post_data = post_resp.json()
 
-            likes_count = data.get("likes", {}).get("summary", {}).get("total_count", 0)
-            comments_count = data.get("comments", {}).get("summary", {}).get("total_count", 0)
-            shares_count = data.get("shares", {}).get("count", 0) if data.get("shares") else 0
+            # Likes from reactions or summary
+            likes = 0
+            if "likes" in post_data:
+                likes = post_data.get("likes", {}).get("summary", {}).get("total_count", 0)
+            if not likes and "post_reactions_by_type_total" in values:
+                reactions = values.get("post_reactions_by_type_total", {})
+                likes = sum(reactions.values()) if isinstance(reactions, dict) else 0
 
-            return PostMetrics(
-                impressions=0,  # Not available in basic API
-                engagements=likes_count + comments_count + shares_count,
-                likes=likes_count,
-                comments=comments_count,
-                shares=shares_count,
-                clicks=0,
-                extra={"raw_post": data, "note": "Limited metrics from basic API"},
-            )
+            comments = post_data.get("comments", {}).get("summary", {}).get("total_count", 0)
+            shares = post_data.get("shares", 0) or 0
         except APIError:
-            return PostMetrics(extra={"error": "Unable to fetch post metrics"})
+            likes = comments = shares = 0
+
+        consumptions = values.get("post_consumptions_by_type", {})
+        total_clicks = sum(consumptions.values()) if isinstance(consumptions, dict) else values.get("post_clicks", 0)
+
+        return PostMetrics(
+            impressions=values.get("post_impressions", values.get("post_impressions_unique", 0)),
+            engagements=values.get("post_engaged_users", 0),
+            clicks=total_clicks,
+            likes=likes,
+            comments=comments,
+            shares=shares,
+            extra={"raw_insights": values, "insights_failed": insights_failed},
+        )
 
     def get_account_metrics(self, access_token: str, date_range: tuple[datetime, datetime]) -> AccountMetrics:
         """Fetch account-level metrics for Facebook page."""
