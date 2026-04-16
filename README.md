@@ -77,12 +77,13 @@ You can deploy it with a one-click button on Heroku, Render, or Railway, run it 
 
 | Heroku | Render | Railway |
 |:------:|:------:|:-------:|
-| [![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/brightbeanxyz/brightbean-studio) | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/brightbeanxyz/brightbean-studio) | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https://github.com/brightbeanxyz/brightbean-studio&referralCode=brightbean) |
+| [![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/brightbeanxyz/brightbean-studio) | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/brightbeanxyz/brightbean-studio) | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/brightbean-studio?referralCode=brightbean) |
 
 After deploying, set these environment variables in your platform's dashboard:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `DJANGO_SETTINGS_MODULE` | Auto-set | `config.settings.production`. Set if deployment config has not placed it. |
 | `SECRET_KEY` | Auto-generated | Django secret key. Set automatically by the deploy button. |
 | `ENCRYPTION_KEY_SALT` | Auto-generated | Encryption salt. Set automatically by the deploy button. |
 | `DATABASE_URL` | Auto-provisioned | PostgreSQL connection string. Set automatically. |
@@ -336,19 +337,7 @@ brightbean-studio/
 └── render.yaml                # Render blueprint
 ```
 
-## Environment Variables
-
-All configuration is via environment variables. See `.env.example` for the full list.
-
-Key variables for local development:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SECRET_KEY` | (required) | Django secret key. Any random string for dev. |
-| `DEBUG` | `false` | Set to `true` for local development. |
-| `DATABASE_URL` | - | PostgreSQL connection string. |
-| `STORAGE_BACKEND` | `local` | `local` for filesystem, `s3` for S3-compatible storage. |
-| `EMAIL_BACKEND_TYPE` | `smtp` | Set to `smtp` for SMTP or leave default (console in dev). |
+> **Settings selection:** The `DJANGO_SETTINGS_MODULE` environment variable controls which settings file Django uses. The defaults are already wired for each context: `manage.py` uses `development`, `wsgi.py`/`asgi.py` use `production`, and `pytest` uses `test` (via `pyproject.toml`). Docker Compose files and platform deploy configs (Heroku, Render) also set it explicitly. You only need to override it manually if you want a non-default module for a specific command, e.g. `DJANGO_SETTINGS_MODULE=config.settings.production python manage.py check --deploy`.
 
 ## Platform Credentials
 
